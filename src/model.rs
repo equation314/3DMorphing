@@ -8,12 +8,7 @@ use crate::Vertex;
 
 const SPHERE_RADIUS: f32 = 100.0;
 
-#[derive(Debug, Clone)]
-pub struct Face3 {
-    a: usize,
-    b: usize,
-    c: usize,
-}
+pub type Face = Vec<usize>;
 
 #[derive(Debug, Clone)]
 struct EdgeList(HashSet<(usize, usize)>);
@@ -35,7 +30,7 @@ impl std::ops::DerefMut for EdgeList {
 #[derive(Debug)]
 pub struct Model {
     verts: Vec<Vertex>,
-    faces: Vec<Face3>,
+    faces: Vec<Face>,
 }
 
 #[derive(Debug)]
@@ -57,14 +52,8 @@ impl std::ops::Deref for ProjectionModel {
 
 #[derive(Debug)]
 pub struct MergedModel {
-    faces: Vec<Face3>,
+    faces: Vec<Face>,
     vert_pairs: Vec<(Vertex, Vertex)>,
-}
-
-impl Face3 {
-    pub fn new(a: usize, b: usize, c: usize) -> Self {
-        Self { a, b, c }
-    }
 }
 
 impl Model {
@@ -76,7 +65,7 @@ impl Model {
         self.faces.len()
     }
 
-    pub fn new(verts: Vec<Vertex>, faces: Vec<Face3>) -> Self {
+    pub fn new(verts: Vec<Vertex>, faces: Vec<Face>) -> Self {
         Self { verts, faces }
     }
 
@@ -87,7 +76,7 @@ impl Model {
         let reader = BufReader::new(file);
 
         let mut verts = Vec::<Vertex>::new();
-        let mut faces = Vec::<Face3>::new();
+        let mut faces = Vec::<Face>::new();
         for line in reader.lines() {
             let line = line?;
             let vals = line.split_whitespace().collect::<Vec<_>>();
@@ -95,16 +84,22 @@ impl Model {
                 continue;
             }
             match vals[0] {
-                "v" => verts.push(Vertex::new(
-                    vals[1].parse().unwrap(),
-                    vals[2].parse().unwrap(),
-                    vals[3].parse().unwrap(),
-                )),
-                "f" => faces.push(Face3::new(
-                    vals[1].parse::<usize>().unwrap() - 1,
-                    vals[2].parse::<usize>().unwrap() - 1,
-                    vals[3].parse::<usize>().unwrap() - 1,
-                )),
+                "v" => {
+                    assert!(vals.len() == 4);
+                    verts.push(Vertex::new(
+                        vals[1].parse().unwrap(),
+                        vals[2].parse().unwrap(),
+                        vals[3].parse().unwrap(),
+                    ))
+                }
+                "f" => {
+                    assert!(vals.len() == 4);
+                    faces.push(vec![
+                        vals[1].parse::<usize>().unwrap() - 1,
+                        vals[2].parse::<usize>().unwrap() - 1,
+                        vals[3].parse::<usize>().unwrap() - 1,
+                    ])
+                }
                 _ => {}
             }
         }
@@ -121,7 +116,11 @@ impl Model {
             writeln!(writer, "v {} {} {}", v.x, v.y, v.z)?;
         }
         for f in &self.faces {
-            writeln!(writer, "f {} {} {}", f.a + 1, f.b + 1, f.c + 1)?;
+            let mut line = "f".to_string();
+            for id in f {
+                line += &format!(" {}", id + 1);
+            }
+            writeln!(writer, "{}", line)?;
         }
         Ok(())
     }
@@ -158,9 +157,9 @@ impl ProjectionModel {
 
         let mut edges = EdgeList::new();
         for f in &model.faces {
-            edges.add(f.a, f.b);
-            edges.add(f.b, f.c);
-            edges.add(f.c, f.a);
+            edges.add(f[0], f[1]);
+            edges.add(f[1], f[2]);
+            edges.add(f[2], f[0]);
         }
 
         Self {
@@ -173,7 +172,7 @@ impl ProjectionModel {
 
     fn project_from_sphere(&self, v: Vertex) -> Vertex {
         for f in &self.faces {
-            let tri = Triangle::new(self.verts[f.a], self.verts[f.b], self.verts[f.c]);
+            let tri = Triangle::new(self.verts[f[0]], self.verts[f[1]], self.verts[f[2]]);
             if let Some(int) = tri.intersect(self.center, v) {
                 return int;
             }
@@ -260,7 +259,7 @@ impl MergedModel {
 
         // TODO: face adjustment
         for f in &model2.faces {
-            all_faces.push(Face3::new(f.a + n, f.b + n, f.c + n))
+            all_faces.push(vec![f[0] + n, f[1] + n, f[2] + n])
         }
 
         // project back to the model
