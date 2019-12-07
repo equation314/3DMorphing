@@ -1,6 +1,7 @@
 use std::env;
 
-use morphing::model::Model;
+use morphing::morphing;
+use morphing::Model;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -9,9 +10,9 @@ fn main() {
         return;
     }
 
-    let model1 = Model::load(&args[1]).expect(&format!("Cannot open model file {}", args[1]));
-    let model2 = Model::load(&args[2]).expect(&format!("Cannot open model file {}", args[2]));
+    let model1 = Model::load(&args[1]).expect(&format!("Cannot open model file \"{}\"", args[1]));
+    let model2 = Model::load(&args[2]).expect(&format!("Cannot open model file \"{}\"", args[2]));
+    let out = morphing(model1, model2, 0.5);
 
-    println!("{:#?} {:#?}", model1.verts.len(), model1.faces.len());
-    println!("{:#?} {:#?}", model2.verts.len(), model2.faces.len());
+    out.save("output.obj").unwrap();
 }

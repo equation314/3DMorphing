@@ -2,12 +2,9 @@ use std::fs::File;
 use std::io::{self, prelude::*, BufReader, BufWriter};
 use std::vec::Vec;
 
-#[derive(Debug)]
-pub struct Vertex {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
+use crate::Vertex;
+
+const SPHERE_RADIUS: f32 = 100.0;
 
 #[derive(Debug)]
 pub struct Face3 {
@@ -22,20 +19,34 @@ pub struct Model {
     pub faces: Vec<Face3>,
 }
 
-impl Vertex {
-    fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { x, y, z }
-    }
+#[derive(Debug)]
+pub struct ProjectionModel {
+    pub model: Model,
+
+    pub center: Vertex,
+    pub sphere_verts: Vec<Vertex>,
 }
 
 impl Face3 {
-    fn new(a: i32, b: i32, c: i32) -> Self {
+    pub fn new(a: i32, b: i32, c: i32) -> Self {
         Self { a, b, c }
     }
 }
 
 impl Model {
-    pub fn load(filename: &str) -> io::Result<Model> {
+    pub fn nr_verts(&self) -> usize {
+        self.verts.len()
+    }
+
+    pub fn nr_faces(&self) -> usize {
+        self.faces.len()
+    }
+
+    pub fn new(verts: Vec<Vertex>, faces: Vec<Face3>) -> Self {
+        Self { verts, faces }
+    }
+
+    pub fn load(filename: &str) -> io::Result<Self> {
         assert!(filename.ends_with(".obj"));
 
         let file = File::open(filename)?;
@@ -63,7 +74,7 @@ impl Model {
                 _ => {}
             }
         }
-        Ok(Model { verts, faces })
+        Ok(Self::new(verts, faces))
     }
 
     pub fn save(&self, filename: &str) -> io::Result<()> {
@@ -79,5 +90,26 @@ impl Model {
             writeln!(writer, "f {} {} {}", f.a, f.b, f.c)?;
         }
         Ok(())
+    }
+}
+
+impl ProjectionModel {
+    pub fn new(model: Model) -> Self {
+        let mut center = Vertex::new(0.0, 0.0, 0.0);
+        for v in &model.verts {
+            center += *v;
+        }
+        center /= model.nr_verts() as f32;
+
+        let mut sphere_verts = Vec::<Vertex>::new();
+        for v in &model.verts {
+            sphere_verts.push(v.project_to_sphere(&center, SPHERE_RADIUS));
+        }
+
+        Self {
+            model,
+            center,
+            sphere_verts,
+        }
     }
 }
