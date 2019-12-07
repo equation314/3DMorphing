@@ -13,6 +13,6 @@ impl Triangle {
     }
 
     pub fn intersect(&self, a: Vertex, b: Vertex) -> Option<Vertex> {
-        Some(a)
+        Some(b)
     }
 }

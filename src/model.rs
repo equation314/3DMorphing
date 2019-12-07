@@ -1,45 +1,64 @@
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, prelude::*, BufReader, BufWriter};
 use std::vec::Vec;
 
-use crate::geo::Triangle;
+use crate::geo::{Arc, ArcIntersectionResult, Triangle};
 use crate::Vertex;
 
 const SPHERE_RADIUS: f32 = 100.0;
 
 #[derive(Debug, Clone)]
 pub struct Face3 {
-    pub a: usize,
-    pub b: usize,
-    pub c: usize,
+    a: usize,
+    b: usize,
+    c: usize,
+}
+
+#[derive(Debug, Clone)]
+struct EdgeList(HashSet<(usize, usize)>);
+
+impl std::ops::Deref for EdgeList {
+    type Target = HashSet<(usize, usize)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for EdgeList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 #[derive(Debug)]
 pub struct Model {
-    pub verts: Vec<Vertex>,
-    pub faces: Vec<Face3>,
+    verts: Vec<Vertex>,
+    faces: Vec<Face3>,
 }
 
 #[derive(Debug)]
 pub struct ProjectionModel {
-    pub model: Model,
+    model: Model,
+    edges: EdgeList,
 
-    pub center: Vertex,
-    pub sphere_verts: Vec<Vertex>,
+    center: Vertex,
+    sphere_verts: Vec<Vertex>,
 }
 
 impl std::ops::Deref for ProjectionModel {
     type Target = Model;
 
-    fn deref(&self) -> &Model {
+    fn deref(&self) -> &Self::Target {
         &self.model
     }
 }
 
 #[derive(Debug)]
 pub struct MergedModel {
-    pub faces: Vec<Face3>,
-    pub vert_pairs: Vec<(Vertex, Vertex)>,
+    faces: Vec<Face3>,
+    vert_pairs: Vec<(Vertex, Vertex)>,
 }
 
 impl Face3 {
@@ -108,6 +127,22 @@ impl Model {
     }
 }
 
+impl EdgeList {
+    fn new() -> Self {
+        Self(HashSet::<(usize, usize)>::new())
+    }
+
+    fn add(&mut self, from: usize, to: usize) -> bool {
+        if from == to {
+            false
+        } else if from < to {
+            self.0.insert((from, to))
+        } else {
+            self.0.insert((to, from))
+        }
+    }
+}
+
 impl ProjectionModel {
     pub fn new(model: Model) -> Self {
         let mut center = Vertex::new(0.0, 0.0, 0.0);
@@ -121,14 +156,22 @@ impl ProjectionModel {
             sphere_verts.push(v.project_to_sphere(center, SPHERE_RADIUS));
         }
 
+        let mut edges = EdgeList::new();
+        for f in &model.faces {
+            edges.add(f.a, f.b);
+            edges.add(f.b, f.c);
+            edges.add(f.c, f.a);
+        }
+
         Self {
             model,
+            edges,
             center,
             sphere_verts,
         }
     }
 
-    pub fn project_from_sphere(&self, v: Vertex) -> Vertex {
+    fn project_from_sphere(&self, v: Vertex) -> Vertex {
         for f in &self.faces {
             let tri = Triangle::new(self.verts[f.a], self.verts[f.b], self.verts[f.c]);
             if let Some(int) = tri.intersect(self.center, v) {
@@ -146,18 +189,22 @@ struct SphereVertex {
 }
 
 impl MergedModel {
-    pub fn new(model1: ProjectionModel, model2: ProjectionModel) -> Self {
+    pub fn merge(model1: ProjectionModel, model2: ProjectionModel) -> Self {
         let mut all_sphere_verts = Vec::<SphereVertex>::new();
         let mut all_faces = model1.faces.clone();
+        let mut all_edges = EdgeList::new();
 
-        for i in 0..model1.nr_verts() {
+        // origin vertices of two models
+        let n = model1.nr_verts();
+        let m = model2.nr_verts();
+        for i in 0..n {
             all_sphere_verts.push(SphereVertex {
                 v: model1.verts[i],
                 from: 1,
                 index: i,
             });
         }
-        for i in 0..model2.nr_verts() {
+        for i in 0..m {
             all_sphere_verts.push(SphereVertex {
                 v: model2.verts[i],
                 from: 2,
@@ -165,11 +212,58 @@ impl MergedModel {
             });
         }
 
-        let n = model1.nr_verts();
+        // calcuation intersection vertices, split & add edges
+        for e in model1.edges.iter() {
+            all_edges.add(e.0, e.1);
+        }
+        for e2 in model2.edges.iter() {
+            let e2 = (e2.0 + n, e2.1 + n);
+            let v1 = all_sphere_verts[e2.0].v;
+            let v2 = all_sphere_verts[e2.1].v;
+            let arc2 = Arc::new(v1, v2, e2.0, e2.1);
+            let mut ints = vec![(0.0, e2.0), (1.0, e2.1)];
+            for e1 in all_edges.clone().iter() {
+                let u1 = all_sphere_verts[e1.0].v;
+                let u2 = all_sphere_verts[e1.1].v;
+                let arc1 = Arc::new(u1, u2, e1.0, e1.1);
+                match Arc::intersect(&arc1, &arc2) {
+                    ArcIntersectionResult::T1(index, ratio) => ints.push((ratio, index)),
+                    ArcIntersectionResult::T2(index, ratio) => {
+                        all_edges.remove(e1);
+                        all_edges.add(e1.0, index);
+                        all_edges.add(e1.1, index);
+                        ints.push((ratio, index))
+                    }
+                    ArcIntersectionResult::X(v, ratio) => {
+                        let id = all_sphere_verts.len();
+                        all_sphere_verts.push(SphereVertex {
+                            v,
+                            from: 0,
+                            index: 0,
+                        });
+                        all_edges.remove(e1);
+                        all_edges.add(e1.0, id);
+                        all_edges.add(e1.1, id);
+                        ints.push((ratio, id))
+                    }
+                    _ => {}
+                }
+                // println!("{:?} {:?}",e1, e2);
+                if ints.len() > 2 {
+                    ints.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    for i in 0..ints.len() - 1 {
+                        all_edges.add(ints[i].1, ints[i + 1].1);
+                    }
+                }
+            }
+        }
+
+        // TODO: face adjustment
         for f in &model2.faces {
             all_faces.push(Face3::new(f.a + n, f.b + n, f.c + n))
         }
 
+        // project back to the model
         let mut model_vert_pairs = Vec::<(Vertex, Vertex)>::new();
         for v in all_sphere_verts {
             match v.from {
