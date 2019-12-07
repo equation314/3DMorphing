@@ -12,17 +12,25 @@ impl Vertex {
         Self { x, y, z }
     }
 
-    pub fn len2(&self) -> f32 {
-        self.x * self.x + self.y * self.y + self.z * self.z
+    pub fn dot(self, rhs: Self) -> f32 {
+        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
     }
 
-    pub fn len(&self) -> f32 {
+    pub fn det(a: Self, b: Self, c: Self) -> f32 {
+        a.dot(b * c)
+    }
+
+    pub fn len2(self) -> f32 {
+        self.dot(self)
+    }
+
+    pub fn len(self) -> f32 {
         self.len2().sqrt()
     }
 
     pub fn project_to_sphere(self, center: Self, radius: f32) -> Self {
         let dir = self - center;
-        center + dir * (radius / dir.len())
+        dir * (radius / dir.len())
     }
 }
 
@@ -47,6 +55,18 @@ impl ops::Mul<f32> for Vertex {
 
     fn mul(self, rhs: f32) -> Self::Output {
         Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
+    }
+}
+
+impl ops::Mul<Vertex> for Vertex {
+    type Output = Self;
+
+    fn mul(self, rhs: Vertex) -> Self::Output {
+        Self::new(
+            self.y * rhs.z - self.z * rhs.y,
+            self.z * rhs.x - self.x * rhs.z,
+            self.x * rhs.y - self.y * rhs.x,
+        )
     }
 }
 
