@@ -20,9 +20,9 @@ impl Vertex {
         self.len2().sqrt()
     }
 
-    pub fn project_to_sphere(&self, center: &Self, radius: f32) -> Self {
-        let dir = *self - *center;
-        *center + dir * (radius / dir.len())
+    pub fn project_to_sphere(self, center: Self, radius: f32) -> Self {
+        let dir = self - center;
+        center + dir * (radius / dir.len())
     }
 }
 
