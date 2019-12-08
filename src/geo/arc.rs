@@ -62,7 +62,11 @@ impl Arc {
         let cd = b.a * b.b;
         let dc = -cd;
         if b.a.dot(ab) * b.b.dot(ba) > EPS && a.a.dot(cd) * a.b.dot(dc) > EPS {
-            let t = a.a.dot(cd) / (a.a - a.b).dot(cd);
+            let div = (a.a - a.b).dot(cd);
+            if div.abs() < EPS {
+                return N;
+            }
+            let t = a.a.dot(cd) / div;
             let v_unit = (a.a + (a.b - a.a) * t).unit();
 
             let c_len = b.a.len();
