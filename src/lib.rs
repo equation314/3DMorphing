@@ -1,4 +1,5 @@
 mod geo;
+mod graph;
 mod model;
 
 pub use geo::Vertex;

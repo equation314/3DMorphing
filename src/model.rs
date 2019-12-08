@@ -1,31 +1,12 @@
-use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, prelude::*, BufReader, BufWriter};
 use std::vec::Vec;
 
 use crate::geo::{Arc, ArcIntersectionResult, Triangle};
+use crate::graph::{Edge, EdgeList, Face, GraphEdgeList};
 use crate::Vertex;
 
 const SPHERE_RADIUS: f64 = 100.0;
-
-pub type Face = Vec<usize>;
-
-#[derive(Debug, Clone)]
-struct EdgeList(BTreeSet<(usize, usize)>);
-
-impl std::ops::Deref for EdgeList {
-    type Target = BTreeSet<(usize, usize)>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for EdgeList {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
 
 #[derive(Debug)]
 pub struct Model {
@@ -75,8 +56,8 @@ impl Model {
         let file = File::open(filename)?;
         let reader = BufReader::new(file);
 
-        let mut verts = Vec::<Vertex>::new();
-        let mut faces = Vec::<Face>::new();
+        let mut verts = Vec::new();
+        let mut faces = Vec::new();
         for line in reader.lines() {
             let line = line?;
             let vals = line.split_whitespace().collect::<Vec<_>>();
@@ -126,22 +107,6 @@ impl Model {
     }
 }
 
-impl EdgeList {
-    fn new() -> Self {
-        Self(BTreeSet::<(usize, usize)>::new())
-    }
-
-    fn add(&mut self, from: usize, to: usize) -> bool {
-        if from == to {
-            false
-        } else if from < to {
-            self.0.insert((from, to))
-        } else {
-            self.0.insert((to, from))
-        }
-    }
-}
-
 impl ProjectionModel {
     pub fn new(model: Model) -> Self {
         let mut center = Vertex::new(0.0, 0.0, 0.0);
@@ -150,7 +115,7 @@ impl ProjectionModel {
         }
         center /= model.nr_verts() as f64;
 
-        let mut sphere_verts = Vec::<Vertex>::new();
+        let mut sphere_verts = Vec::new();
         for v in &model.verts {
             sphere_verts.push(v.project_to_sphere(center, SPHERE_RADIUS));
         }
@@ -189,7 +154,7 @@ struct SphereVertex {
 
 impl MergedModel {
     pub fn merge(model1: ProjectionModel, model2: ProjectionModel) -> Self {
-        let mut all_sphere_verts = Vec::<SphereVertex>::new();
+        let mut all_sphere_verts = Vec::new();
         let mut all_faces = model1.faces.clone();
         let mut all_edges = EdgeList::new();
 
@@ -214,24 +179,26 @@ impl MergedModel {
 
         // calcuation intersection vertices, split & add edges
         for e in model1.edges.iter() {
-            all_edges.add(e.0, e.1);
+            all_edges.add(e.from, e.to);
         }
         for e2 in model2.edges.iter() {
-            let e2 = (e2.0 + n, e2.1 + n);
-            let v1 = all_sphere_verts[e2.0].v;
-            let v2 = all_sphere_verts[e2.1].v;
-            let arc2 = Arc::new(v1, v2, e2.0, e2.1);
-            let mut ints = vec![(0.0, e2.0), (1.0, e2.1)];
-            for e1 in all_edges.clone().iter() {
-                let u1 = all_sphere_verts[e1.0].v;
-                let u2 = all_sphere_verts[e1.1].v;
-                let arc1 = Arc::new(u1, u2, e1.0, e1.1);
+            let e2 = Edge::new(e2.from + n, e2.to + n);
+            let v1 = all_sphere_verts[e2.from].v;
+            let v2 = all_sphere_verts[e2.to].v;
+            let arc2 = Arc::new(v1, v2, e2.from, e2.to);
+            let mut ints = vec![(0.0, e2.from), (1.0, e2.to)];
+
+            for e1 in &mut all_edges.clone().iter() {
+                let u1 = all_sphere_verts[e1.from].v;
+                let u2 = all_sphere_verts[e1.to].v;
+                let arc1 = Arc::new(u1, u2, e1.from, e1.to);
+
                 match Arc::intersect(&arc1, &arc2) {
                     ArcIntersectionResult::T1(index, k) => ints.push((k, index)),
                     ArcIntersectionResult::T2(index, k) => {
                         all_edges.remove(e1);
-                        all_edges.add(e1.0, index);
-                        all_edges.add(e1.1, index);
+                        all_edges.add(e1.from, index);
+                        all_edges.add(e1.to, index);
                         ints.push((k, index))
                     }
                     ArcIntersectionResult::X(v, k) => {
@@ -242,14 +209,14 @@ impl MergedModel {
                             index: 0,
                         });
                         all_edges.remove(e1);
-                        all_edges.add(e1.0, id);
-                        all_edges.add(e1.1, id);
+                        all_edges.add(e1.from, id);
+                        all_edges.add(e1.to, id);
                         ints.push((k, id))
                     }
                     ArcIntersectionResult::L(id1, id2) => {
-                        if id2 == e2.0 {
+                        if id2 == e2.from {
                             ints[0].1 = id1
-                        } else if id2 == e2.1 {
+                        } else if id2 == e2.to {
                             ints[1].1 = id1
                         }
                     }
@@ -265,13 +232,13 @@ impl MergedModel {
         }
         println!("SIZE {:?} {:?}", all_sphere_verts.len(), all_edges.len());
 
-        // TODO: face adjustment
+        // TODO: face tracing
         for f in &model2.faces {
             all_faces.push(vec![f[0] + n, f[1] + n, f[2] + n])
         }
 
         // project back to the model
-        let mut model_vert_pairs = Vec::<(Vertex, Vertex)>::new();
+        let mut model_vert_pairs = Vec::new();
         for v in all_sphere_verts {
             match v.from {
                 1 => {
@@ -294,7 +261,7 @@ impl MergedModel {
     }
 
     pub fn interpolation(&self, ratio: f64) -> Model {
-        let mut new_verts = Vec::<Vertex>::new();
+        let mut new_verts = Vec::new();
         for (v1, v2) in &self.vert_pairs {
             new_verts.push(*v1 + (*v2 - *v1) * ratio);
         }
