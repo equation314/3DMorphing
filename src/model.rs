@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, prelude::*, BufReader, BufWriter};
 use std::vec::Vec;
@@ -6,15 +6,15 @@ use std::vec::Vec;
 use crate::geo::{Arc, ArcIntersectionResult, Triangle};
 use crate::Vertex;
 
-const SPHERE_RADIUS: f32 = 100.0;
+const SPHERE_RADIUS: f64 = 100.0;
 
 pub type Face = Vec<usize>;
 
 #[derive(Debug, Clone)]
-struct EdgeList(HashSet<(usize, usize)>);
+struct EdgeList(BTreeSet<(usize, usize)>);
 
 impl std::ops::Deref for EdgeList {
-    type Target = HashSet<(usize, usize)>;
+    type Target = BTreeSet<(usize, usize)>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -128,7 +128,7 @@ impl Model {
 
 impl EdgeList {
     fn new() -> Self {
-        Self(HashSet::<(usize, usize)>::new())
+        Self(BTreeSet::<(usize, usize)>::new())
     }
 
     fn add(&mut self, from: usize, to: usize) -> bool {
@@ -148,7 +148,7 @@ impl ProjectionModel {
         for v in &model.verts {
             center += *v;
         }
-        center /= model.nr_verts() as f32;
+        center /= model.nr_verts() as f64;
 
         let mut sphere_verts = Vec::<Vertex>::new();
         for v in &model.verts {
@@ -198,18 +198,19 @@ impl MergedModel {
         let m = model2.nr_verts();
         for i in 0..n {
             all_sphere_verts.push(SphereVertex {
-                v: model1.verts[i],
+                v: model1.sphere_verts[i],
                 from: 1,
                 index: i,
             });
         }
         for i in 0..m {
             all_sphere_verts.push(SphereVertex {
-                v: model2.verts[i],
+                v: model2.sphere_verts[i],
                 from: 2,
                 index: i,
             });
         }
+        println!("SIZE {:?} {:?}", all_sphere_verts.len(), all_edges.len());
 
         // calcuation intersection vertices, split & add edges
         for e in model1.edges.iter() {
@@ -226,14 +227,14 @@ impl MergedModel {
                 let u2 = all_sphere_verts[e1.1].v;
                 let arc1 = Arc::new(u1, u2, e1.0, e1.1);
                 match Arc::intersect(&arc1, &arc2) {
-                    ArcIntersectionResult::T1(index, ratio) => ints.push((ratio, index)),
-                    ArcIntersectionResult::T2(index, ratio) => {
+                    ArcIntersectionResult::T1(index, k) => ints.push((k, index)),
+                    ArcIntersectionResult::T2(index, k) => {
                         all_edges.remove(e1);
                         all_edges.add(e1.0, index);
                         all_edges.add(e1.1, index);
-                        ints.push((ratio, index))
+                        ints.push((k, index))
                     }
-                    ArcIntersectionResult::X(v, ratio) => {
+                    ArcIntersectionResult::X(v, k) => {
                         let id = all_sphere_verts.len();
                         all_sphere_verts.push(SphereVertex {
                             v,
@@ -243,11 +244,17 @@ impl MergedModel {
                         all_edges.remove(e1);
                         all_edges.add(e1.0, id);
                         all_edges.add(e1.1, id);
-                        ints.push((ratio, id))
+                        ints.push((k, id))
                     }
-                    _ => {}
+                    ArcIntersectionResult::L(id1, id2) => {
+                        if id2 == e2.0 {
+                            ints[0].1 = id1
+                        } else if id2 == e2.1 {
+                            ints[1].1 = id1
+                        }
+                    }
+                    ArcIntersectionResult::N => {}
                 }
-                // println!("{:?} {:?}",e1, e2);
                 if ints.len() > 2 {
                     ints.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                     for i in 0..ints.len() - 1 {
@@ -256,6 +263,7 @@ impl MergedModel {
                 }
             }
         }
+        println!("SIZE {:?} {:?}", all_sphere_verts.len(), all_edges.len());
 
         // TODO: face adjustment
         for f in &model2.faces {
@@ -285,10 +293,10 @@ impl MergedModel {
         }
     }
 
-    pub fn interpolation(&self, ratio: f32) -> Model {
+    pub fn interpolation(&self, ratio: f64) -> Model {
         let mut new_verts = Vec::<Vertex>::new();
         for (v1, v2) in &self.vert_pairs {
-            new_verts.push(*v1 * (1.0 - ratio) + *v2 * ratio)
+            new_verts.push(*v1 + (*v2 - *v1) * ratio);
         }
         Model::new(new_verts, self.faces.clone())
     }
