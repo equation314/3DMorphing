@@ -1,5 +1,6 @@
 use super::EPS;
 
+use std::vec::Vec;
 use std::{cmp, ops};
 
 #[derive(Debug, Clone, Copy)]
@@ -37,6 +38,19 @@ impl Vertex {
     pub fn project_to_sphere(self, center: Self, radius: f64) -> Self {
         let dir = self - center;
         dir * (radius / dir.len())
+    }
+
+    pub fn check_order(verts: &Vec<Self>) -> bool {
+        let n = verts.len();
+        if n < 3 {
+            return false;
+        }
+        let mut s = 0.0;
+        let first = verts[0];
+        for i in 1..n - 1 {
+            s += Self::det(first, verts[i], verts[i + 1]);
+        }
+        return s > EPS;
     }
 }
 
