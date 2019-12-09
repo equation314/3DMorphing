@@ -32,7 +32,20 @@ impl Vertex {
     }
 
     pub fn unit(self) -> Self {
-        self / self.len()
+        let len = self.len();
+        if len.abs() < EPS {
+            self
+        } else {
+            self / len
+        }
+    }
+
+    pub fn dist2(a: Self, b: Self) -> f64 {
+        (a - b).len2()
+    }
+
+    pub fn dist(a: Self, b: Self) -> f64 {
+        (a - b).len()
     }
 
     pub fn project_to_sphere(self, center: Self, radius: f64) -> Self {

@@ -175,6 +175,7 @@ impl MergedModel {
                 index: i,
             });
         }
+        println!("SIZE {:?} {:?}", all_sphere_verts.len(), all_edges.len());
 
         // calcuation new vertices from intersection, split & add edges
         for e in model1.edges.iter() {
@@ -187,6 +188,7 @@ impl MergedModel {
             let arc2 = Arc::new(v1, v2, e2.from, e2.to);
             let mut ints = vec![(0.0, e2.from), (1.0, e2.to)];
 
+            let mut donot_add = false;
             for e1 in &mut all_edges.clone().iter() {
                 let u1 = all_sphere_verts[e1.from].v;
                 let u2 = all_sphere_verts[e1.to].v;
@@ -194,11 +196,10 @@ impl MergedModel {
 
                 match Arc::intersect(&arc1, &arc2) {
                     ArcIntersectionResult::T1(index, k) => ints.push((k, index)),
-                    ArcIntersectionResult::T2(index, k) => {
+                    ArcIntersectionResult::T2(index, _k) => {
                         all_edges.remove(e1);
                         all_edges.add(e1.from, index);
                         all_edges.add(e1.to, index);
-                        ints.push((k, index))
                     }
                     ArcIntersectionResult::X(v, k) => {
                         let id = all_sphere_verts.len();
@@ -212,15 +213,42 @@ impl MergedModel {
                         all_edges.add(e1.to, id);
                         ints.push((k, id))
                     }
+                    ArcIntersectionResult::I((id1, k1), (id2, k2)) => {
+                        all_edges.remove(e1);
+                        if k1 > 0.0 {
+                            ints.push((k1, id1))
+                        } else if k1 < 0.0 {
+                            all_edges.add(id1, ints[0].1);
+                        } else {
+                            // assert!(id1 == e2.from);
+                        }
+
+                        if k2 < 1.0 {
+                            ints.push((k2, id2))
+                        } else if k2 > 1.0 {
+                            all_edges.add(id2, ints[1].1);
+                        } else {
+                            // assert!(id2 == e2.to);
+                        }
+                    }
                     ArcIntersectionResult::L(id1, id2) => {
                         if id2 == e2.from {
+                            // assert!(ints[0].1 == id1);
                             ints[0].1 = id1
                         } else if id2 == e2.to {
+                            // assert!(ints[1].1 == id1);
                             ints[1].1 = id1
                         }
                     }
+                    ArcIntersectionResult::S => {
+                        donot_add = true;
+                        break;
+                    }
                     ArcIntersectionResult::N => {}
                 }
+            }
+            if donot_add {
+                continue;
             }
 
             ints.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -283,6 +311,8 @@ impl MergedModel {
         for e in edges.iter() {
             graph.add_pair(e.from, e.to);
         }
+
+        // get next edge
         for i in 0..n {
             let v = verts[i];
             let v_len2 = v.len2();
@@ -294,17 +324,21 @@ impl MergedModel {
                     let p = verts[e.borrow().to];
                     let dir = (p - v * (v.dot(p) / v_len2)).unit();
                     let norm = first_dir * dir;
-                    let det = v.dot(norm);
-                    let angle = if det > EPS {
-                        first_dir.dot(dir).acos()
+                    let cos = first_dir.dot(dir);
+                    let mut angle = if (cos - 1.0).abs() < EPS {
+                        0.0
+                    } else if (cos + 1.0).abs() < EPS {
+                        std::f64::consts::PI
                     } else {
-                        -first_dir.dot(dir).acos()
+                        cos.acos()
                     };
+                    if v.dot(norm) < -EPS {
+                        angle = -angle;
+                    }
                     (angle, e)
                 })
                 .collect::<Vec<(f64, &RcGraphEdge)>>();
             adj_edges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
-
             let m = adj_edges.len();
             for j in 0..m {
                 let k = if j == m - 1 { 0 } else { j + 1 };
@@ -312,6 +346,7 @@ impl MergedModel {
             }
         }
 
+        // get faces
         let mut faces = Vec::<Face>::new();
         for i in 0..n {
             for e in graph.neighbors(i) {
