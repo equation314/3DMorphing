@@ -1,9 +1,10 @@
 use std::fs::File;
 use std::io::{self, prelude::*, BufReader, BufWriter};
 use std::vec::Vec;
+use std::{cmp::Ordering, ops::Deref};
 
-use crate::geo::{Arc, ArcIntersectionResult, Triangle};
-use crate::graph::{Edge, EdgeList, Face, GraphEdge, GraphEdgeList};
+use crate::geo::{Arc, ArcIntersectionResult, Triangle, EPS};
+use crate::graph::{Edge, EdgeList, Face, Graph, RcGraphEdge};
 use crate::Vertex;
 
 const SPHERE_RADIUS: f64 = 100.0;
@@ -23,7 +24,7 @@ pub struct ProjectionModel {
     sphere_verts: Vec<Vertex>,
 }
 
-impl std::ops::Deref for ProjectionModel {
+impl Deref for ProjectionModel {
     type Target = Model;
 
     fn deref(&self) -> &Self::Target {
@@ -249,10 +250,11 @@ impl MergedModel {
                 )),
             }
         }
+
         // FIXME: show all edges
-        for p in model_vert_pairs.clone().iter() {
-            model_vert_pairs.push(*p)
-        }
+        // for p in model_vert_pairs.clone().iter() {
+        //     model_vert_pairs.push(*p)
+        // }
 
         MergedModel {
             vert_pairs: model_vert_pairs,
@@ -269,9 +271,72 @@ impl MergedModel {
     }
 
     fn resolve_faces(verts: &Vec<Vertex>, edges: &EdgeList) -> Vec<Face> {
-        let mut faces = Vec::new();
+        // FIXME: show all edges
+        // let mut faces = Vec::new();
+        // for e in edges.iter() {
+        //     faces.push(vec![e.from, e.to, e.to + verts.len()])
+        // }
+        // return faces;
+
+        let n = verts.len();
+        let mut graph = Graph::new(n);
         for e in edges.iter() {
-            faces.push(vec![e.from, e.to, e.to + verts.len()])
+            graph.add_pair(e.from, e.to);
+        }
+        for i in 0..n {
+            let v = verts[i];
+            let v_len2 = v.len2();
+            let first = verts[graph.neighbors(i).next().unwrap().borrow().to];
+            let first_dir = (first - v * (v.dot(first) / v_len2)).unit();
+            let mut adj_edges = graph
+                .neighbors(i)
+                .map(|e| {
+                    let p = verts[e.borrow().to];
+                    let dir = (p - v * (v.dot(p) / v_len2)).unit();
+                    let norm = first_dir * dir;
+                    let det = v.dot(norm);
+                    let angle = if det > EPS {
+                        first_dir.dot(dir).acos()
+                    } else {
+                        -first_dir.dot(dir).acos()
+                    };
+                    (angle, e)
+                })
+                .collect::<Vec<(f64, &RcGraphEdge)>>();
+            adj_edges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+
+            let m = adj_edges.len();
+            for j in 0..m {
+                let k = if j == m - 1 { 0 } else { j + 1 };
+                adj_edges[j].1.borrow_mut().next = std::rc::Rc::downgrade(&adj_edges[k].1);
+            }
+        }
+
+        let mut faces = Vec::<Face>::new();
+        for i in 0..n {
+            for e in graph.neighbors(i) {
+                let mut e = e.clone();
+                let mut one_face = Vec::new();
+                while !e.borrow().visited {
+                    let p = e.borrow().to;
+                    one_face.push(p);
+                    e.borrow_mut().visited = true;
+                    let o = e.borrow().oppo.upgrade().unwrap();
+                    let n = o.borrow().next.upgrade().unwrap();
+                    e = n;
+                }
+                if one_face.len() > 2 {
+                    if !Vertex::check_order(
+                        &one_face
+                            .iter()
+                            .map(|id| verts[*id])
+                            .collect::<Vec<Vertex>>(),
+                    ) {
+                        one_face.reverse();
+                    }
+                    faces.push(one_face);
+                }
+            }
         }
         faces
     }

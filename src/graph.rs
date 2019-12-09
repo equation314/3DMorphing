@@ -5,18 +5,29 @@ use std::rc::{Rc, Weak};
 
 pub type Face = Vec<usize>;
 
+pub type RcGraphEdge = Rc<RefCell<GraphEdge>>;
+pub type WeakGraphEdge = Weak<RefCell<GraphEdge>>;
+
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub from: usize,
     pub to: usize,
-    oppo_edge: Option<Weak<RefCell<Edge>>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct EdgeList(BTreeSet<Edge>);
 
 #[derive(Debug)]
-pub struct GraphEdgeList(Vec<Vec<Rc<RefCell<Edge>>>>);
+pub struct GraphEdge {
+    pub from: usize,
+    pub to: usize,
+    pub oppo: WeakGraphEdge,
+    pub next: WeakGraphEdge,
+    pub visited: bool,
+}
+
+#[derive(Debug)]
+pub struct Graph(Vec<Vec<RcGraphEdge>>);
 
 impl Ord for Edge {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -54,10 +65,18 @@ impl std::ops::DerefMut for EdgeList {
 
 impl Edge {
     pub fn new(from: usize, to: usize) -> Self {
+        Self { from, to }
+    }
+}
+
+impl GraphEdge {
+    pub fn new(from: usize, to: usize) -> Self {
         Self {
             from,
             to,
-            oppo_edge: None,
+            oppo: Weak::new(),
+            next: Weak::new(),
+            visited: false,
         }
     }
 }
@@ -78,17 +97,21 @@ impl EdgeList {
     }
 }
 
-impl GraphEdgeList {
+impl Graph {
     pub fn new(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity))
+        Self(vec![Vec::new(); capacity])
     }
 
     pub fn add_pair(&mut self, from: usize, to: usize) {
-        let e1 = Rc::new(RefCell::new(Edge::new(from, to)));
-        let e2 = Rc::new(RefCell::new(Edge::new(to, from)));
-        e1.borrow_mut().oppo_edge = Some(Rc::downgrade(&e2));
-        e2.borrow_mut().oppo_edge = Some(Rc::downgrade(&e1));
+        let e1 = Rc::new(RefCell::new(GraphEdge::new(from, to)));
+        let e2 = Rc::new(RefCell::new(GraphEdge::new(to, from)));
+        e1.borrow_mut().oppo = Rc::downgrade(&e2);
+        e2.borrow_mut().oppo = Rc::downgrade(&e1);
         self.0[from].push(e1);
         self.0[to].push(e2);
+    }
+
+    pub fn neighbors(&self, index: usize) -> impl Iterator<Item = &RcGraphEdge> {
+        self.0[index].iter()
     }
 }
