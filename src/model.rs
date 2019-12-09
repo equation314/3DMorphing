@@ -298,6 +298,28 @@ impl MergedModel {
         Model::new(new_verts, self.faces.clone())
     }
 
+    pub fn save(&self, filename: &str) -> io::Result<()> {
+        assert!(filename.ends_with(".obj"));
+
+        let file = File::create(filename)?;
+        let mut writer = BufWriter::new(file);
+
+        for v in &self.vert_pairs {
+            writeln!(writer, "v {} {} {}", v.0.x, v.0.y, v.0.z)?;
+        }
+        for v in &self.vert_pairs {
+            writeln!(writer, "u {} {} {}", v.1.x, v.1.y, v.1.z)?;
+        }
+        for f in &self.faces {
+            let mut line = "f".to_string();
+            for id in f {
+                line += &format!(" {}", id + 1);
+            }
+            writeln!(writer, "{}", line)?;
+        }
+        Ok(())
+    }
+
     fn resolve_faces(verts: &Vec<Vertex>, edges: &EdgeList) -> Vec<Face> {
         // FIXME: show all edges
         // let mut faces = Vec::new();
