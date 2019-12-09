@@ -7,8 +7,8 @@ pub use model::{MergedModel, Model};
 
 use model::ProjectionModel;
 
-pub fn merge(model1: Model, model2: Model) -> MergedModel {
+pub fn merge(model1: Model, model2: Model, edge_only: bool) -> MergedModel {
     let model1 = ProjectionModel::new(model1);
     let model2 = ProjectionModel::new(model2);
-    MergedModel::merge(model1, model2)
+    MergedModel::merge(model1, model2, edge_only)
 }

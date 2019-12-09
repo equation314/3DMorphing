@@ -154,7 +154,7 @@ struct SphereVertex {
 }
 
 impl MergedModel {
-    pub fn merge(model1: ProjectionModel, model2: ProjectionModel) -> Self {
+    pub fn merge(model1: ProjectionModel, model2: ProjectionModel, edge_only: bool) -> Self {
         let mut all_sphere_verts = Vec::new();
         let mut all_edges = EdgeList::new();
 
