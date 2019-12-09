@@ -34,7 +34,13 @@ fn main() {
             Arg::with_name("edge_only")
                 .long("edge")
                 .short("e")
-                .help("Product edges only, no faces"),
+                .help("Show edges only, no faces"),
+        )
+        .arg(
+            Arg::with_name("shpere_only")
+                .long("shpere")
+                .short("s")
+                .help("All vertices are on the shpere, do not project back to the origin model"),
         )
         .get_matches();
 
@@ -45,7 +51,12 @@ fn main() {
     let model1 = Model::load(fname1).expect(&format!("Cannot open model file \"{}\"", fname1));
     let model2 = Model::load(fname2).expect(&format!("Cannot open model file \"{}\"", fname2));
 
-    let merged_model = morphing::merge(model1, model2, matches.occurrences_of("edge_only") > 0);
+    let merged_model = morphing::merge(
+        model1,
+        model2,
+        matches.occurrences_of("edge_only") > 0,
+        matches.occurrences_of("shpere_only") > 0,
+    );
     let merged_fname = format!(
         "{}_{}.obj",
         Path::new(fname1).file_stem().unwrap().to_string_lossy(),

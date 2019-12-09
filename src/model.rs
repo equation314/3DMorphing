@@ -154,7 +154,12 @@ struct SphereVertex {
 }
 
 impl MergedModel {
-    pub fn merge(model1: ProjectionModel, model2: ProjectionModel, edge_only: bool) -> Self {
+    pub fn merge(
+        model1: ProjectionModel,
+        model2: ProjectionModel,
+        edge_only: bool,
+        sphere_only: bool,
+    ) -> Self {
         let mut all_sphere_verts = Vec::new();
         let mut all_edges = EdgeList::new();
 
@@ -258,31 +263,39 @@ impl MergedModel {
         }
         println!("SIZE {:?} {:?}", all_sphere_verts.len(), all_edges.len());
 
-        // face tracing
-        let all_faces =
-            Self::resolve_faces(&all_sphere_verts.iter().map(|v| v.v).collect(), &all_edges);
-
         // project back to the origin model
         let mut model_vert_pairs = Vec::new();
-        for v in all_sphere_verts {
-            match v.from {
-                1 => {
-                    model_vert_pairs.push((model1.verts[v.index], model2.project_from_sphere(v.v)))
+        for v in &all_sphere_verts {
+            if sphere_only {
+                model_vert_pairs.push((v.v, v.v));
+            } else {
+                match v.from {
+                    1 => model_vert_pairs
+                        .push((model1.verts[v.index], model2.project_from_sphere(v.v))),
+                    2 => model_vert_pairs
+                        .push((model1.project_from_sphere(v.v), model2.verts[v.index])),
+                    _ => model_vert_pairs.push((
+                        model1.project_from_sphere(v.v),
+                        model2.project_from_sphere(v.v),
+                    )),
                 }
-                2 => {
-                    model_vert_pairs.push((model1.project_from_sphere(v.v), model2.verts[v.index]))
-                }
-                _ => model_vert_pairs.push((
-                    model1.project_from_sphere(v.v),
-                    model2.project_from_sphere(v.v),
-                )),
             }
         }
 
-        // FIXME: show all edges
-        // for p in model_vert_pairs.clone().iter() {
-        //     model_vert_pairs.push(*p)
-        // }
+        let all_faces = if edge_only {
+            // show all edges only, without faces
+            for p in model_vert_pairs.clone().iter() {
+                model_vert_pairs.push(*p)
+            }
+            let n = all_sphere_verts.len();
+            all_edges
+                .iter()
+                .map(|e| vec![e.from, e.to, e.to + n])
+                .collect()
+        } else {
+            // face tracing
+            Self::resolve_faces(&all_sphere_verts.iter().map(|v| v.v).collect(), &all_edges)
+        };
 
         MergedModel {
             vert_pairs: model_vert_pairs,
@@ -321,13 +334,6 @@ impl MergedModel {
     }
 
     fn resolve_faces(verts: &Vec<Vertex>, edges: &EdgeList) -> Vec<Face> {
-        // FIXME: show all edges
-        // let mut faces = Vec::new();
-        // for e in edges.iter() {
-        //     faces.push(vec![e.from, e.to, e.to + verts.len()])
-        // }
-        // return faces;
-
         let n = verts.len();
         let mut graph = Graph::new(n);
         for e in edges.iter() {
