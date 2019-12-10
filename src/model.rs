@@ -5,9 +5,11 @@ use std::{cmp::Ordering, ops::Deref};
 
 use crate::geo::{adjust_order, Arc, ArcIntersectionResult, Face, Triangle, EPS};
 use crate::graph::{Edge, EdgeList, Graph, RcGraphEdge};
+use crate::Config;
 use crate::Vertex;
 
 const SPHERE_RADIUS: f64 = 100.0;
+const MODEL_SIZE: f64 = 1.0;
 
 #[derive(Debug)]
 pub struct Model {
@@ -180,12 +182,7 @@ impl MergedModel {
         Ok(())
     }
 
-    pub fn merge(
-        model1: ProjectionModel,
-        model2: ProjectionModel,
-        edge_only: bool,
-        sphere_only: bool,
-    ) -> Self {
+    pub fn merge(model1: ProjectionModel, model2: ProjectionModel, config: Config) -> Self {
         let mut all_sphere_verts = Vec::new();
         let mut all_edges = EdgeList::new();
 
@@ -290,26 +287,48 @@ impl MergedModel {
         println!("SIZE {:?} {:?}", all_sphere_verts.len(), all_edges.len());
 
         // project back to the origin model
+        let mut scale = vec![0.0, 0.0];
         let mut model_vert_pairs = Vec::new();
         for v in &all_sphere_verts {
-            if sphere_only {
-                model_vert_pairs.push((v.v, v.v));
+            let mut p = if config.sphere_only {
+                (v.v, v.v)
             } else {
                 match v.from {
-                    1 => model_vert_pairs
-                        .push((model1.verts[v.index], model2.project_from_sphere(v.v))),
-                    2 => model_vert_pairs
-                        .push((model1.project_from_sphere(v.v), model2.verts[v.index])),
-                    _ => model_vert_pairs.push((
+                    1 => (model1.verts[v.index], model2.project_from_sphere(v.v)),
+                    2 => (model1.project_from_sphere(v.v), model2.verts[v.index]),
+                    _ => (
                         model1.project_from_sphere(v.v),
                         model2.project_from_sphere(v.v),
-                    )),
+                    ),
+                }
+            };
+            p.0 -= model1.center;
+            p.1 -= model2.center;
+            model_vert_pairs.push(p);
+            let p = vec![p.0, p.1];
+            for i in 0..2 {
+                for x in vec![p[i].x, p[i].y, p[i].z] {
+                    if x.abs() > scale[i] {
+                        scale[i] = x.abs();
+                    }
                 }
             }
         }
 
+        // scale models to the same scale
+        println!("Scales: {:?}", scale);
+        if !config.scale {
+            let r = if scale[0] > scale[1] { scale[0] } else { scale[1] };
+            scale[0] = r;
+            scale[1] = r;
+        }
+        for p in &mut model_vert_pairs {
+            p.0 *= MODEL_SIZE / scale[0];
+            p.1 *= MODEL_SIZE / scale[1];
+        }
+
         let all_sphere_verts = all_sphere_verts.iter().map(|v| v.v).collect::<Vec<_>>();
-        let all_faces = if edge_only {
+        let all_faces = if config.edge_only {
             // show all edges only, without faces
             for p in model_vert_pairs.clone().iter() {
                 model_vert_pairs.push(*p)
