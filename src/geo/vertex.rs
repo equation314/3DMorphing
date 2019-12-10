@@ -1,7 +1,6 @@
 use super::EPS;
 
-use std::vec::Vec;
-use std::{cmp, ops};
+use std::{cmp::Ordering, ops};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Vertex {
@@ -52,28 +51,31 @@ impl Vertex {
         let dir = self - center;
         dir * (radius / dir.len())
     }
+}
 
-    pub fn check_order(verts: &Vec<Self>) -> bool {
-        let n = verts.len();
-        if n < 3 {
-            return false;
-        }
-        let mut s = 0.0;
-        let first = verts[0];
-        for i in 1..n - 1 {
-            s += Self::det(first, verts[i], verts[i + 1]);
-        }
-        return s > EPS;
+impl Ord for Vertex {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.x, self.y, self.z)
+            .partial_cmp(&(other.x, other.y, other.z))
+            .unwrap_or(Ordering::Equal)
     }
 }
 
-impl cmp::PartialEq for Vertex {
+impl PartialOrd for Vertex {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Vertex {
     fn eq(&self, other: &Self) -> bool {
         (self.x - other.x).abs() < EPS
             && (self.y - other.y).abs() < EPS
             && (self.z - other.z).abs() < EPS
     }
 }
+
+impl Eq for Vertex {}
 
 impl ops::Add for Vertex {
     type Output = Self;

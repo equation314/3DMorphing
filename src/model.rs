@@ -3,8 +3,8 @@ use std::io::{self, prelude::*, BufReader, BufWriter};
 use std::vec::Vec;
 use std::{cmp::Ordering, ops::Deref};
 
-use crate::geo::{Arc, ArcIntersectionResult, Triangle, EPS};
-use crate::graph::{Edge, EdgeList, Face, Graph, RcGraphEdge};
+use crate::geo::{adjust_order, Arc, ArcIntersectionResult, Face, Triangle, EPS};
+use crate::graph::{Edge, EdgeList, Graph, RcGraphEdge};
 use crate::Vertex;
 
 const SPHERE_RADIUS: f64 = 100.0;
@@ -49,6 +49,14 @@ impl Model {
 
     pub fn new(verts: Vec<Vertex>, faces: Vec<Face>) -> Self {
         Self { verts, faces }
+    }
+
+    pub fn center(&self) -> Vertex {
+        let mut center = Vertex::new(0.0, 0.0, 0.0);
+        for v in &self.verts {
+            center += *v;
+        }
+        center / self.nr_verts() as f64
     }
 
     pub fn load(filename: &str) -> io::Result<Self> {
@@ -110,11 +118,7 @@ impl Model {
 
 impl ProjectionModel {
     pub fn new(model: Model) -> Self {
-        let mut center = Vertex::new(0.0, 0.0, 0.0);
-        for v in &model.verts {
-            center += *v;
-        }
-        center /= model.nr_verts() as f64;
+        let center = model.center();
 
         let mut sphere_verts = Vec::new();
         for v in &model.verts {
@@ -139,7 +143,7 @@ impl ProjectionModel {
     fn project_from_sphere(&self, v: Vertex) -> Vertex {
         for f in &self.faces {
             let tri = Triangle::new(self.verts[f[0]], self.verts[f[1]], self.verts[f[2]]);
-            if let Some(int) = tri.intersect(self.center, v) {
+            if let Some(int) = tri.intersect(self.center, self.center + v) {
                 return int;
             }
         }
@@ -154,6 +158,28 @@ struct SphereVertex {
 }
 
 impl MergedModel {
+    pub fn save(&self, filename: &str) -> io::Result<()> {
+        assert!(filename.ends_with(".obj"));
+
+        let file = File::create(filename)?;
+        let mut writer = BufWriter::new(file);
+
+        for v in &self.vert_pairs {
+            writeln!(writer, "v {} {} {}", v.0.x, v.0.y, v.0.z)?;
+        }
+        for v in &self.vert_pairs {
+            writeln!(writer, "u {} {} {}", v.1.x, v.1.y, v.1.z)?;
+        }
+        for f in &self.faces {
+            let mut line = "f".to_string();
+            for id in f {
+                line += &format!(" {}", id + 1);
+            }
+            writeln!(writer, "{}", line)?;
+        }
+        Ok(())
+    }
+
     pub fn merge(
         model1: ProjectionModel,
         model2: ProjectionModel,
@@ -282,6 +308,7 @@ impl MergedModel {
             }
         }
 
+        let all_sphere_verts = all_sphere_verts.iter().map(|v| v.v).collect::<Vec<_>>();
         let all_faces = if edge_only {
             // show all edges only, without faces
             for p in model_vert_pairs.clone().iter() {
@@ -294,12 +321,38 @@ impl MergedModel {
                 .collect()
         } else {
             // face tracing
-            Self::resolve_faces(&all_sphere_verts.iter().map(|v| v.v).collect(), &all_edges)
+            Self::resolve_faces(&all_sphere_verts, &all_edges)
         };
+
+        // triangulize & unique
+        let mut triangle_faces = Vec::new();
+        let mut set = std::collections::BTreeSet::<Vec<usize>>::new();
+        for f in all_faces {
+            if f.len() > 3 {
+                for i in 1..f.len() - 1 {
+                    let mut tri = vec![f[0], f[i], f[i + 1]];
+                    tri.sort();
+                    if f[0] == f[i] || f[0] == f[i + 1] {
+                        continue;
+                    }
+                    if set.insert(tri.clone()) {
+                        adjust_order(&mut tri, &all_sphere_verts, Vertex::new(0.0, 0.0, 0.0));
+                        triangle_faces.push(tri);
+                    }
+                }
+            } else {
+                let mut tri = f;
+                tri.sort();
+                if set.insert(tri.clone()) {
+                    adjust_order(&mut tri, &all_sphere_verts, Vertex::new(0.0, 0.0, 0.0));
+                    triangle_faces.push(tri);
+                }
+            }
+        }
 
         MergedModel {
             vert_pairs: model_vert_pairs,
-            faces: all_faces,
+            faces: triangle_faces,
         }
     }
 
@@ -308,34 +361,18 @@ impl MergedModel {
         for (v1, v2) in &self.vert_pairs {
             new_verts.push(*v1 + (*v2 - *v1) * ratio);
         }
-        Model::new(new_verts, self.faces.clone())
-    }
 
-    pub fn save(&self, filename: &str) -> io::Result<()> {
-        assert!(filename.ends_with(".obj"));
-
-        let file = File::create(filename)?;
-        let mut writer = BufWriter::new(file);
-
-        for v in &self.vert_pairs {
-            writeln!(writer, "v {} {} {}", v.0.x, v.0.y, v.0.z)?;
+        let mut model = Model::new(new_verts, self.faces.clone());
+        let center = model.center();
+        for mut f in &mut model.faces {
+            adjust_order(&mut f, &model.verts, center);
         }
-        for v in &self.vert_pairs {
-            writeln!(writer, "u {} {} {}", v.1.x, v.1.y, v.1.z)?;
-        }
-        for f in &self.faces {
-            let mut line = "f".to_string();
-            for id in f {
-                line += &format!(" {}", id + 1);
-            }
-            writeln!(writer, "{}", line)?;
-        }
-        Ok(())
+        model
     }
 
     fn resolve_faces(verts: &Vec<Vertex>, edges: &EdgeList) -> Vec<Face> {
         let n = verts.len();
-        let mut graph = Graph::new(n);
+        let mut graph = Graph::new(verts);
         for e in edges.iter() {
             graph.add_pair(e.from, e.to);
         }
@@ -344,6 +381,10 @@ impl MergedModel {
         for i in 0..n {
             let v = verts[i];
             let v_len2 = v.len2();
+            let m = graph.neighbors_count(i);
+            if m < 1 {
+                continue;
+            }
             let first = verts[graph.neighbors(i).next().unwrap().borrow().to];
             let first_dir = (first - v * (v.dot(first) / v_len2)).unit();
             let mut adj_edges = graph
@@ -367,7 +408,6 @@ impl MergedModel {
                 })
                 .collect::<Vec<(f64, &RcGraphEdge)>>();
             adj_edges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
-            let m = adj_edges.len();
             for j in 0..m {
                 let k = if j == m - 1 { 0 } else { j + 1 };
                 adj_edges[j].1.borrow_mut().next = std::rc::Rc::downgrade(&adj_edges[k].1);
@@ -384,19 +424,11 @@ impl MergedModel {
                     let p = e.borrow().to;
                     one_face.push(p);
                     e.borrow_mut().visited = true;
-                    let o = e.borrow().oppo.upgrade().unwrap();
-                    let n = o.borrow().next.upgrade().unwrap();
+                    let o = e.borrow().oppo.upgrade().expect("No opposite edge!");
+                    let n = o.borrow().next.upgrade().expect("No next edge");
                     e = n;
                 }
                 if one_face.len() > 2 {
-                    if !Vertex::check_order(
-                        &one_face
-                            .iter()
-                            .map(|id| verts[*id])
-                            .collect::<Vec<Vertex>>(),
-                    ) {
-                        one_face.reverse();
-                    }
                     faces.push(one_face);
                 }
             }
