@@ -51,6 +51,43 @@ impl Vertex {
         let dir = self - center;
         dir * (radius / dir.len())
     }
+
+    pub fn bounding_box(verts: &Vec<Self>) -> (Self, Self) {
+        let mut bbox = (Self::new(std::f64::MAX, std::f64::MAX, std::f64::MAX),
+        Self::new(std::f64::MIN, std::f64::MIN, std::f64::MIN));
+        for v in verts {
+            if v.x < bbox.0.x {
+                bbox.0.x = v.x
+            }
+            if v.y < bbox.0.y {
+                bbox.0.y = v.y
+            }
+            if v.z < bbox.0.z {
+                bbox.0.z = v.z
+            }
+
+            if v.x > bbox.1.x {
+                bbox.1.x = v.x
+            }
+            if v.y > bbox.1.y {
+                bbox.1.y = v.y
+            }
+            if v.z > bbox.1.z {
+                bbox.1.z = v.z
+            }
+        }
+        bbox
+    }
+
+    pub fn max(self) -> f64 {
+        if self.x > self.y && self.x > self.z {
+            self.x
+        } else if self.y > self.z {
+            self.y
+        } else {
+            self.z
+        }
+    }
 }
 
 impl Ord for Vertex {

@@ -287,7 +287,6 @@ impl MergedModel {
         println!("SIZE {:?} {:?}", all_sphere_verts.len(), all_edges.len());
 
         // project back to the origin model
-        let mut scale = vec![0.0, 0.0];
         let mut model_vert_pairs = Vec::new();
         for v in &all_sphere_verts {
             let mut p = if config.sphere_only {
@@ -305,26 +304,25 @@ impl MergedModel {
             p.0 -= model1.center;
             p.1 -= model2.center;
             model_vert_pairs.push(p);
-            let p = vec![p.0, p.1];
-            for i in 0..2 {
-                for x in vec![p[i].x, p[i].y, p[i].z] {
-                    if x.abs() > scale[i] {
-                        scale[i] = x.abs();
-                    }
-                }
-            }
         }
 
         // scale models to the same scale
-        println!("Scales: {:?}", scale);
+        let bbox1 = Vertex::bounding_box(&model_vert_pairs.iter().map(|p| p.0).collect());
+        let bbox2 = Vertex::bounding_box(&model_vert_pairs.iter().map(|p| p.1).collect());
+        let mut scale1 = (bbox1.1 - bbox1.0).max();
+        let mut scale2 = (bbox2.1 - bbox2.0).max();
+        println!("Bounding box 1: {:?}", bbox1);
+        println!("Bounding box 2: {:?}", bbox2);
+        println!("Scale 1: {:?}", scale1);
+        println!("Scale 2: {:?}", scale2);
         if !config.scale {
-            let r = if scale[0] > scale[1] { scale[0] } else { scale[1] };
-            scale[0] = r;
-            scale[1] = r;
+            let r = if scale1 > scale2 { scale1 } else { scale2 };
+            scale1 = r;
+            scale2 = r;
         }
         for p in &mut model_vert_pairs {
-            p.0 *= MODEL_SIZE / scale[0];
-            p.1 *= MODEL_SIZE / scale[1];
+            p.0 *= MODEL_SIZE / scale1;
+            p.1 *= MODEL_SIZE / scale2;
         }
 
         let all_sphere_verts = all_sphere_verts.iter().map(|v| v.v).collect::<Vec<_>>();
