@@ -7,7 +7,13 @@ Implementations of the following 3D morphing algorithm:
 ## Build
 
 ```
-cargo build --release
+make
+```
+
+## Run
+
+```
+make run o1=<obj1> o2=<obj2>
 ```
 
 ## Usage
